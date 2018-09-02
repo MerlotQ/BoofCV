@@ -126,11 +126,16 @@ public class CommonAutoCalibrationChecks {
 		// compute fundamental matrices
 		GEquation eq = new GEquation();
 
+
 		// Create a homography which will change the projections P from metric into a
 		// more general projective transform
 		eq.process("A = 1.5*eye(3)");
 		eq.process("H = [A, [0;0;0];[0.1,0.5,1.1,1.8]]");
 //		eq.lookupDDRM("H").print();
+
+		// Compute Q_inf from its definition. See 19.8 in the Multi View Geometry Book
+		eq.process("HH=inv(H)");
+		Q = eq.process("Q=HH*diag([1 1 1 0])*HH'").lookupDDRM("Q");
 
 		for (int i = 1; i < listCameraToWorld.size(); i++) {
 			DMatrixRMaj K = PerspectiveOps.pinholeToMatrix(cameras.get(i),(DMatrixRMaj)null);
@@ -141,12 +146,6 @@ public class CommonAutoCalibrationChecks {
 			DMatrixRMaj P = eq.process("P = [K*R, K*T]*H").lookupDDRM("P").copy();
 			listP.add(P);
 		}
-
-		// Compute Q_inf from its definition. See 19.8 in the Multi View Geometry Book
-		eq.process("H=inv(H)");
-		Q = eq.process("Q=H*diag([1 1 1 0])*H'").lookupDDRM("Q");
-//		System.out.println("---------Q");
-//		Q.print();
 	}
 
 	public void addProjectives(SelfCalibrationBase alg ) {
