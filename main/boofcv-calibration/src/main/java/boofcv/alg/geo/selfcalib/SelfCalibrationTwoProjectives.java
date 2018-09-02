@@ -19,12 +19,14 @@
 package boofcv.alg.geo.selfcalib;
 
 import org.ddogleg.optimization.functions.FunctionNtoS;
+import org.ejml.data.Complex_F64;
 import org.ejml.data.DMatrix4x4;
 import org.ejml.data.DMatrixRMaj;
 import org.ejml.dense.row.CommonOps_DDRM;
-import org.ejml.dense.row.SingularOps_DDRM;
+import org.ejml.dense.row.factory.DecompositionFactory_DDRM;
 import org.ejml.equation.Equation;
 import org.ejml.equation.Sequence;
+import org.ejml.interfaces.decomposition.EigenDecomposition_F64;
 import org.ejml.ops.ConvertDMatrixStruct;
 
 /**
@@ -32,55 +34,79 @@ import org.ejml.ops.ConvertDMatrixStruct;
  */
 public class SelfCalibrationTwoProjectives extends SelfCalibrationBase {
 
-	public void process( DMatrixRMaj Q ) {
+	EigenDecomposition_F64<DMatrixRMaj> eigen = DecompositionFactory_DDRM.eig(10,true,true);
+
+	public boolean process( DMatrixRMaj Q ) {
 		DMatrixRMaj A0 = new DMatrixRMaj(10,10);
 		DMatrixRMaj A1 = new DMatrixRMaj(10,10);
 
-		DMatrixRMaj EQ0 = A0.createLike();
-		DMatrixRMaj EQ1 = A0.createLike();
-		DMatrixRMaj EQ2 = A0.createLike();
-		DMatrixRMaj EQ3 = A0.createLike();
-		DMatrixRMaj EQ4 = A0.createLike();
-		DMatrixRMaj EQ_SUM = EQ0.createLike();
+		DMatrixRMaj EQ = A0.createLike();
+		DMatrixRMaj EQ_SUM = A0.createLike();
 
 		for (int i = 1; i < projectives.size; i++) {
-			Projective P0 = projectives.get(0);
+			Projective P0 = projectives.get(0); // seems to work better then i-1
 			Projective P1 = projectives.get(i);
 
 			A0.zero();A1.zero();
 			I00J01(A0,convert(P0),convert(P1));
 			I00J01(A1,convert(P1),convert(P0));
-			CommonOps_DDRM.subtract(A0,A1,EQ0);
-			CommonOps_DDRM.add(EQ_SUM,EQ0,EQ_SUM);
+			CommonOps_DDRM.subtract(A0,A1,EQ);
+			CommonOps_DDRM.add(EQ_SUM,EQ,EQ_SUM);
 
 			A0.zero();A1.zero();
 			I01J02(A0,convert(P0),convert(P1));
 			I01J02(A1,convert(P1),convert(P0));
-			CommonOps_DDRM.subtract(A0,A1,EQ1);
-			CommonOps_DDRM.add(EQ_SUM,EQ1,EQ_SUM);
+			CommonOps_DDRM.subtract(A0,A1,EQ);
+			CommonOps_DDRM.add(EQ_SUM,EQ,EQ_SUM);
 
 			A0.zero();A1.zero();
 			I02J11(A0,convert(P0),convert(P1));
 			I02J11(A1,convert(P1),convert(P0));
-			CommonOps_DDRM.subtract(A0,A1,EQ2);
-			CommonOps_DDRM.add(EQ_SUM,EQ2,EQ_SUM);
+			CommonOps_DDRM.subtract(A0,A1,EQ);
+			CommonOps_DDRM.add(EQ_SUM,EQ,EQ_SUM);
 
 			A0.zero();A1.zero();
 			I11J12(A0,convert(P0),convert(P1));
 			I11J12(A1,convert(P1),convert(P0));
-			CommonOps_DDRM.subtract(A0,A1,EQ3);
-			CommonOps_DDRM.add(EQ_SUM,EQ3,EQ_SUM);
+			CommonOps_DDRM.subtract(A0,A1,EQ);
+			CommonOps_DDRM.add(EQ_SUM,EQ,EQ_SUM);
 
 			A0.zero();A1.zero();
 			I12J22(A0,convert(P0),convert(P1));
 			I12J22(A1,convert(P1),convert(P0));
-			CommonOps_DDRM.subtract(A0,A1,EQ4);
-			CommonOps_DDRM.add(EQ_SUM,EQ4,EQ_SUM);
+			CommonOps_DDRM.subtract(A0,A1,EQ);
+			CommonOps_DDRM.add(EQ_SUM,EQ,EQ_SUM);
 		}
 
 		CommonOps_DDRM.divide(EQ_SUM,EQ_SUM.get(9,9));
 
-		EQ_SUM.print();
+		// Lagrange multiplies can be used to solve  min q'*Q*q  s.t. |q| = 1
+		// solution is smallest eigenvalue of 0.5*(A + A')
+//		EQ_SUM.print();
+		CommonOps_DDRM.transpose(EQ_SUM,EQ);
+		CommonOps_DDRM.add(0.5,EQ_SUM,0.5,EQ,EQ);
+
+		if( !eigen.decompose(EQ) ) {
+			return false;
+		}
+
+		int indexSmallest = -1;
+		double smallest = Double.MAX_VALUE;
+		for (int i = 0; i < eigen.getNumberOfEigenvalues(); i++) {
+			Complex_F64 value = eigen.getEigenvalue(i);
+			System.out.println("Eigenvalue = "+value);
+
+			if( value.isReal() && Math.abs(value.real) < smallest ) {
+				smallest = Math.abs(value.real);
+				indexSmallest = i;
+			}
+		}
+		if( indexSmallest < 0 )
+			return false;
+
+		DMatrixRMaj v = eigen.getEigenVector(indexSmallest);
+		System.out.println("smallest = "+smallest);
+		v.print();
 
 		DMatrixRMaj q = new DMatrixRMaj(10,1);
 		q.data[0] = Q.get(0,0);
@@ -93,44 +119,16 @@ public class SelfCalibrationTwoProjectives extends SelfCalibrationBase {
 		q.data[7] = Q.get(2,2);
 		q.data[8] = Q.get(2,3);
 		q.data[9] = Q.get(3,3);
-
-		double sv[] = SingularOps_DDRM.singularValues(EQ_SUM);
-		for (int i = 0; i < sv.length; i++) {
-			System.out.println("sv["+i+"] = "+sv[i]);
-		}
-
-		Equation eq = new Equation(q,"q",EQ_SUM,"EQ");
-		eq.print("foo = q'*EQ");
-		eq.process("zero = q'*EQ*q/(q'*q)");
-		System.out.println("zero = "+eq.lookupDouble("zero"));
 		q.print();
 
-//		UnconstrainedMinimization optimizer = FactoryOptimization.unconstrained();
-//
-//		CommonOps_DDRM.fill(q,1);
-//		RandomMatrices_DDRM.fillUniform(q,-0.5,0.5,new Random((234)));
-//		optimizer.setVerbose(System.out,0);
-//		optimizer.setFunction(new Function(EQ_SUM),null,0);
-//		optimizer.initialize(q.data,1e-8,1e-8);
-//
-//		System.out.println("before = "+optimizer.getFunctionValue());
-//		UtilOptimize.process(optimizer,100);
-//		System.out.println("after = "+optimizer.getFunctionValue());
+		Equation eq = new Equation(q,"q",EQ_SUM,"EQ");
+		eq.process("zero = q'*EQ*q/(q'*q)");
+		System.out.println("zero = "+eq.lookupDouble("zero"));
+		eq.alias(v,"q");
+		eq.process("zero = q'*EQ*q/(q'*q)");
+		System.out.println("zero = "+eq.lookupDouble("zero"));
 
-//		q.data = optimizer.getParameters();
-//		q.print();
-		System.out.println("START newton's method");
-
-		eq.alias(EQ_SUM,"Q",q,"x");
-		eq.print("value = x'*Q*x");
-		for (int i = 0; i < 50; i++) {
-			eq.process("f = (4*(x'*Q*x))(0,0)*(Q*x)");
-			eq.process("J = 8*(Q*x)*(x'*Q) + 4*(x'*Q*x)(0,0)*Q");
-			eq.process("x = x - solve(J,f)");
-			q.print();
-			eq.print("value = x'*Q*x");
-			System.out.println();
-		}
+		return true;
 	}
 
 	static class Function implements FunctionNtoS {

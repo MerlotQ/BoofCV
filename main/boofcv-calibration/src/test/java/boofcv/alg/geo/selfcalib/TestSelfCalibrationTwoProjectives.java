@@ -29,7 +29,7 @@ import static org.junit.Assert.fail;
 /**
  * @author Peter Abeles
  */
-public class TestSelfCalibrationFourView extends CommonAutoCalibrationChecks {
+public class TestSelfCalibrationTwoProjectives extends CommonAutoCalibrationChecks {
 	@Test
 	public void stuff() {
 		CameraPinhole expected = new CameraPinhole(400,410,-3,500,505,0,0);
